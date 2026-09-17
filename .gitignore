@@ -1,0 +1,7 @@
+dist/
+*.exe
+*.app
+tokens-cache.json
+state.json
+status.txt
+usage-tray.log

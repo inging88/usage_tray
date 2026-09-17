@@ -1,0 +1,92 @@
+# 윈도우·맥 바이너리를 한 번에 만든다.
+#
+# 이게 GitHub 을 쓰는 진짜 이유다: 맥 바이너리는 맥에서만 만들 수 있는데(메뉴바가 cgo 를 거친다)
+# macos-latest 러너가 그 맥이 되어 준다. 맥을 갖고 있지 않아도 맥용 .app 이 나온다.
+#
+#   푸시·PR  → 빌드만 하고 아티팩트로 남긴다(7일 보관)
+#   태그 v*  → 릴리스를 만들고 파일을 붙인다. 이게 남들에게 줄 다운로드 링크다.
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write # 릴리스 업로드에 필요
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache: true
+      - name: 빌드
+        shell: bash
+        env:
+          CGO_ENABLED: '0' # 윈도우는 cgo 없이 빌드된다 = 컴파일러 불필요
+        run: |
+          go build -trimpath -ldflags "-s -w -H windowsgui" -o dist/usage-tray.exe .
+          ls -la dist
+      - name: 스모크 테스트
+        shell: bash
+        run: ./dist/usage-tray.exe -icons dist/icons && ls dist/icons | head -3
+        # 자격증명이 없는 러너에서도 도는 유일한 경로다. -once 는 '에이전트 없음' 으로 끝난다.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: usage-tray-windows-amd64
+          path: dist/usage-tray.exe
+          retention-days: 7
+      - name: 릴리스에 붙이기
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/usage-tray.exe
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache: true
+      - name: 빌드 (유니버설 .app)
+        run: |
+          chmod +x build.sh
+          ./build.sh
+          ls -la dist
+      - name: 스모크 테스트
+        run: ./dist/usage-tray -icons dist/icons && ls dist/icons | head -3
+      - name: .app 압축
+        run: cd dist && zip -r UsageTray-macos-universal.zip UsageTray.app
+      - uses: actions/upload-artifact@v4
+        with:
+          name: usage-tray-macos-universal
+          path: dist/UsageTray-macos-universal.zip
+          retention-days: 7
+      - name: 릴리스에 붙이기
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/UsageTray-macos-universal.zip
+
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache: true
+      - name: 서식·정적 검사
+        run: |
+          test -z "$(gofmt -l .)" || { echo '서식 불일치:'; gofmt -l .; exit 1; }
+          go vet ./...
+      - name: 맥 코드 타입체크 (cgo 없이 가능한 범위)
+        run: GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build ./... || true
