@@ -18,6 +18,8 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -147,26 +149,110 @@ func leftFrom(util *float64) int {
 	return l
 }
 
+// 이 엔드포인트는 자주 부르면 429 를 준다. 실제로 하루 272번 맞았다 —
+// 우리 트레이(60초)와 statusline(60초)이 같은 곳을 따로 부르고 있었기 때문이다.
+// 그래서 세 겹으로 막는다.
+//
+//	(1) statusline 이 방금 받아 둔 캐시가 있으면 그걸 쓴다 — API 를 아예 안 부른다.
+//	(2) 그래도 부를 때는 최소 간격(claudePollMin)을 지킨다.
+//	(3) 429 를 받으면 백오프를 두 배로 늘려 가며 쉰다(최대 30분).
+//
+// 5시간·주간 창은 분 단위로 요동치지 않으므로 이렇게 해도 화면은 충분히 최신이다.
+const (
+	claudePollMin = 3 * time.Minute // 429 를 맞은 뒤 정한 값. 창이 분 단위로 안 변해 충분하다
+	codexPollMin  = 2 * time.Minute
+)
+
+var (
+	claudeBackoff      time.Duration
+	claudeBackoffUntil time.Time
+)
+
+// statusline.ps1 이 쓰는 캐시. 같은 엔드포인트의 응답을 그대로 담고 있다.
+func claudeCacheFile() string {
+	if runtime.GOOS != "windows" {
+		return ""
+	}
+	tmp := os.Getenv("TEMP")
+	if tmp == "" {
+		return ""
+	}
+	return filepath.Join(tmp, "claude", "statusline-usage-cache.json")
+}
+
+func claudeFromCache(maxAge time.Duration) (claudeUsageResp, int, bool) {
+	var r claudeUsageResp
+	p := claudeCacheFile()
+	if p == "" {
+		return r, 0, false
+	}
+	st, err := os.Stat(p)
+	if err != nil {
+		return r, 0, false
+	}
+	age := time.Since(st.ModTime())
+	if age > maxAge {
+		return r, 0, false
+	}
+	b, err := os.ReadFile(p)
+	if err != nil || json.Unmarshal(b, &r) != nil {
+		return r, 0, false
+	}
+	if r.FiveHour.Utilization == nil && r.SevenDay.Utilization == nil {
+		return r, 0, false
+	}
+	return r, int(age.Seconds()), true
+}
+
 func fetchClaude() AgentUsage {
 	u := emptyAgent()
 	u.Available = true
+
+	// (1) 남이 방금 받아 둔 값이 있으면 그걸 쓴다.
+	if r, age, ok := claudeFromCache(2 * time.Minute); ok {
+		u.Src = fmt.Sprintf("캐시 %ds", age)
+		fillClaude(&u, r)
+		u.AgeMin = age / 60
+		return u
+	}
+
 	tok := claudeToken()
 	if tok == "" {
 		logf("claude: 토큰 없음")
 		return u
 	}
+	// (3) 429 로 쉬는 중이면 부르지 않는다 — 부르면 백오프가 늘어날 뿐이다.
+	if time.Now().Before(claudeBackoffUntil) {
+		return u
+	}
 	var r claudeUsageResp
-	_, err := getJSON("https://api.anthropic.com/api/oauth/usage", map[string]string{
+	code, err := getJSON("https://api.anthropic.com/api/oauth/usage", map[string]string{
 		"Accept":         "application/json",
 		"Authorization":  "Bearer " + tok,
 		"anthropic-beta": "oauth-2025-04-20",
 		"User-Agent":     "usage-tray/1.0",
 	}, &r)
 	if err != nil {
-		logf("claude api 실패: %v", err)
+		if code == 429 || code == 503 {
+			if claudeBackoff == 0 {
+				claudeBackoff = 5 * time.Minute
+			} else if claudeBackoff < 30*time.Minute {
+				claudeBackoff *= 2
+			}
+			claudeBackoffUntil = time.Now().Add(claudeBackoff)
+			logf("claude api %d — %v 쉰다", code, claudeBackoff)
+		} else {
+			logf("claude api 실패: %v", err)
+		}
 		return u
 	}
+	claudeBackoff, claudeBackoffUntil = 0, time.Time{}
 	u.Src = "api"
+	fillClaude(&u, r)
+	return u
+}
+
+func fillClaude(u *AgentUsage, r claudeUsageResp) {
 	u.Short = Window{Left: leftFrom(r.FiveHour.Utilization), ResetAt: parseISO(r.FiveHour.ResetsAt), WindowS: 5 * 3600, Label: "5h"}
 	u.Week = Window{Left: leftFrom(r.SevenDay.Utilization), ResetAt: parseISO(r.SevenDay.ResetsAt), WindowS: 7 * 86400, Label: "7d"}
 	if r.ExtraUsage.IsEnabled && r.ExtraUsage.Utilization != nil {
@@ -174,7 +260,6 @@ func fetchClaude() AgentUsage {
 	}
 	u.OK = u.Short.Left >= 0 || u.Week.Left >= 0
 	u.AgeMin = 0
-	return u
 }
 
 // ---------------------------------------------------------------- Codex

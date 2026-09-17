@@ -140,8 +140,13 @@ func main() {
 	refresh()
 	if *once {
 		mu.RLock()
-		fmt.Println(state.Summary)
+		s := *state
 		mu.RUnlock()
+		fmt.Println(s.Summary)
+		// 툴팁·메뉴에 뜨는 그대로 — 눈으로 확인할 때 쓴다.
+		for _, l := range ownLines(&s) {
+			fmt.Println("  " + l)
+		}
 		return
 	}
 
@@ -180,13 +185,40 @@ func serve(ln net.Listener) {
 
 // ---------------------------------------------------------------- 수집
 
+// 조회가 실패했을 때 화면을 비우지 않는다 — 직전 정상값을 그대로 두고 나이만 붙인다.
+// 간헐적인 429·네트워크 오류에 아이콘이 회색 '값 없음' 으로 깜빡이는 걸 막는 장치다.
+func keepLastGood(cur, prev AgentUsage, prevAt time.Time) AgentUsage {
+	if cur.OK || !prev.OK || prevAt.IsZero() {
+		return cur
+	}
+	out := prev
+	out.Src = "직전값"
+	out.AgeMin = int(time.Since(prevAt).Minutes())
+	return out
+}
+
+var lastFetch struct{ claude, codex time.Time }
+
 func refresh() {
+	mu.RLock()
+	prevState := *state
+	mu.RUnlock()
+
 	c, x := emptyAgent(), emptyAgent()
 	if agents.claude {
-		c = fetchClaude()
+		// 최소 간격을 지킨다. 그 사이에는 직전값을 그대로 쓴다(아래 keepLastGood).
+		if time.Since(lastFetch.claude) >= claudePollMin {
+			lastFetch.claude = time.Now()
+			c = fetchClaude()
+		}
+		c = keepLastGood(c, prevState.Claude, prevState.Updated)
 	}
 	if agents.codex {
-		x = fetchCodex()
+		if time.Since(lastFetch.codex) >= codexPollMin {
+			lastFetch.codex = time.Now()
+			x = fetchCodex()
+		}
+		x = keepLastGood(x, prevState.Codex, prevState.Updated)
 	}
 	mu.Lock()
 	prev := state.Alerts
@@ -379,14 +411,13 @@ func checkAlerts(s *State) {
 // ---------------------------------------------------------------- 트레이
 
 func onReady() {
-	var claudeItem, codexItem *systray.MenuItem
-	if agents.claude {
-		claudeItem = systray.AddMenuItem("Claude", "")
-		claudeItem.Disable()
-	}
-	if agents.codex {
-		codexItem = systray.AddMenuItem("Codex", "")
-		codexItem.Disable()
+	// 맡은 에이전트의 창을 줄마다 하나씩. 클릭 대상이 아니므로 비활성으로 둔다.
+	infoItems := []*systray.MenuItem{}
+	for i := 0; i < 4; i++ {
+		it := systray.AddMenuItem(" ", "")
+		it.Disable()
+		it.Hide()
+		infoItems = append(infoItems, it)
 	}
 	systray.AddSeparator()
 	mDetail := systray.AddMenuItem("상세 보기", "브라우저로 상세 화면을 연다")
@@ -406,11 +437,14 @@ func onReady() {
 		systray.SetIcon(trayIcon(left, brand))
 		systray.SetTitle("")
 		systray.SetTooltip(tooltip(&s))
-		if claudeItem != nil {
-			claudeItem.SetTitle(menuLine("Claude", &s.Claude))
-		}
-		if codexItem != nil {
-			codexItem.SetTitle(menuLine("Codex", &s.Codex))
+		lines := ownLines(&s)
+		for i, it := range infoItems {
+			if i < len(lines) {
+				it.SetTitle(lines[i])
+				it.Show()
+			} else {
+				it.Hide()
+			}
 		}
 	}
 	paint()
@@ -487,46 +521,98 @@ func iconChoice(s *State) (int, color.NRGBA) {
 	}
 }
 
-func menuLine(name string, a *AgentUsage) string {
-	if !a.Available {
-		return name
+// 툴팁·메뉴에 쓰는 한 줄. "주간  100% 남음 · 리셋 9/25(금) 08:00 (7일 뒤)"
+// 왼쪽을 창 이름으로 맞추고 %를 세 자리 폭으로 채워 위아래가 눈에 정렬돼 보이게 한다.
+func windowLine(label string, w Window) string {
+	if w.Left < 0 {
+		return fmt.Sprintf("%-5s  값 없음", label)
 	}
-	var p []string
-	if a.Week.Left >= 0 {
-		p = append(p, fmt.Sprintf("7d %d%% (%s)", a.Week.Left, fmtReset(a.Week.ResetAt, true)))
+	s := fmt.Sprintf("%-5s %3d%% 남음", label, w.Left)
+	if w.ResetAt > 0 {
+		s += " · 리셋 " + fmtResetHuman(w.ResetAt)
+		if u := fmtUntil(w.ResetAt); u != "" {
+			s += " (" + u + ")"
+		}
 	}
-	if a.Short.Left >= 0 {
-		p = append(p, fmt.Sprintf("5h %d%% (%s)", a.Short.Left, fmtReset(a.Short.ResetAt, false)))
+	return s
+}
+
+func windowName(w Window, fallback string) string {
+	switch {
+	case w.WindowS >= 2*86400:
+		return "주간"
+	case w.WindowS > 0:
+		return fmt.Sprintf("%d시간", w.WindowS/3600)
 	}
+	return fallback
+}
+
+// 이 프로세스가 맡은 에이전트만 자세히 낸다 — 아이콘이 에이전트별로 갈렸으므로
+// 툴팁에 남의 값을 섞으면 오히려 읽기 어렵다.
+func agentLines(name string, a *AgentUsage) []string {
+	lines := []string{name}
+	if a.Week.Left >= 0 || a.Week.ResetAt > 0 {
+		lines = append(lines, windowLine(windowName(a.Week, "주간"), a.Week))
+	}
+	if a.Short.Left >= 0 || a.Short.ResetAt > 0 {
+		lines = append(lines, windowLine(windowName(a.Short, "5시간"), a.Short))
+	}
+	var notes []string
 	if a.Limit != "" {
-		p = append(p, "한도 도달")
+		notes = append(notes, "한도 도달")
 	}
-	if len(p) == 0 {
-		p = append(p, "값 없음")
+	switch {
+	// 갓 받은 캐시는 live 와 다를 게 없다 — 굳이 알리지 않는다. 묵은 것만 밝힌다.
+	case a.Src == "직전값":
+		notes = append(notes, "직전값 "+fmtAge(a.AgeMin)+" 전")
+	case strings.HasPrefix(a.Src, "캐시") && a.AgeMin >= 2:
+		notes = append(notes, a.Src)
+	case a.Src == "rollout" && a.AgeMin >= 0:
+		notes = append(notes, "기록 "+fmtAge(a.AgeMin)+" 전")
 	}
-	return name + "  " + strings.Join(p, " · ")
+	if !a.OK && a.Src == "" {
+		notes = append(notes, "값을 못 받았다")
+	}
+	if len(notes) > 0 {
+		lines = append(lines, strings.Join(notes, " · "))
+	}
+	return lines
+}
+
+func ownLines(s *State) []string {
+	if tag() == "codex" || (!s.Claude.Available && s.Codex.Available) {
+		return agentLines("Codex", &s.Codex)
+	}
+	return agentLines("Claude", &s.Claude)
 }
 
 func tooltip(s *State) string {
-	var lines []string
-	if s.Claude.Available {
-		lines = append(lines, menuLine("Claude", &s.Claude))
-	}
-	if s.Codex.Available {
-		l := menuLine("Codex", &s.Codex)
-		if s.Codex.Src == "live" {
-			l += " · live"
-		} else if s.Codex.AgeMin >= 0 {
-			l += " · 기록 " + fmtAge(s.Codex.AgeMin) + " 전"
-		}
-		lines = append(lines, l)
-	}
-	t := strings.Join(lines, "\n")
-	// Windows 툴팁은 128자 제한이다.
-	if len(t) > 127 {
-		t = t[:124] + "..."
+	t := strings.Join(ownLines(s), "\n")
+	// Windows 툴팁은 127자 제한이다. 바이트로 자르면 한글이 깨지므로 룬 단위로 자른다.
+	r := []rune(t)
+	if len(r) > 126 {
+		t = string(r[:123]) + "..."
 	}
 	return t
+}
+
+// 자기 자신을 -only 로 두 번 띄운다. 부모는 바로 빠지므로 프로세스는 둘만 남는다.
+func spawnChildren() {
+	exe, err := os.Executable()
+	if err != nil {
+		logf("자기 경로를 못 찾는다: %v", err)
+		return
+	}
+	for _, a := range []string{"claude", "codex"} {
+		cmd := exec.Command(exe, "-only", a)
+		hideWindow(cmd)
+		if err := cmd.Start(); err != nil {
+			logf("%s 인스턴스를 못 띄웠다: %v", a, err)
+			continue
+		}
+		_ = cmd.Process.Release()
+		logf("spawned: -only %s", a)
+	}
 }
 
 // 아이콘이 실제로 어떻게 그려지는지 눈으로 확인할 때. 트레이 캡처가 안 되는 환경에서 쓴다.
@@ -549,23 +635,4 @@ func dumpIcons(dir string) {
 		}
 	}
 	fmt.Println("아이콘 견본을 썼다:", dir)
-}
-
-// 자기 자신을 -only 로 두 번 띄운다. 부모는 바로 빠지므로 프로세스는 둘만 남는다.
-func spawnChildren() {
-	exe, err := os.Executable()
-	if err != nil {
-		logf("자기 경로를 못 찾는다: %v", err)
-		return
-	}
-	for _, a := range []string{"claude", "codex"} {
-		cmd := exec.Command(exe, "-only", a)
-		hideWindow(cmd)
-		if err := cmd.Start(); err != nil {
-			logf("%s 인스턴스를 못 띄웠다: %v", a, err)
-			continue
-		}
-		_ = cmd.Process.Release()
-		logf("spawned: -only %s", a)
-	}
 }

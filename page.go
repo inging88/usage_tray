@@ -43,6 +43,45 @@ func fmtReset(unix int64, withDay bool) string {
 	return t.Format("15:04")
 }
 
+var weekdayKo = [...]string{"일", "월", "화", "수", "목", "금", "토"}
+
+// 리셋 시각을 사람이 바로 읽게. 오늘/내일은 그렇게 쓰고, 그 밖은 9/25(금) 08:00.
+func fmtResetHuman(unix int64) string {
+	if unix <= 0 {
+		return "?"
+	}
+	t := time.Unix(unix, 0).Local()
+	now := time.Now().Local()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	days := int(t.Sub(today).Hours() / 24)
+	switch days {
+	case 0:
+		return "오늘 " + t.Format("15:04")
+	case 1:
+		return "내일 " + t.Format("15:04")
+	}
+	return fmt.Sprintf("%d/%d(%s) %s", int(t.Month()), t.Day(), weekdayKo[int(t.Weekday())], t.Format("15:04"))
+}
+
+// 얼마나 남았나 — 5시간 창은 분까지, 주간 창은 일까지.
+func fmtUntil(unix int64) string {
+	if unix <= 0 {
+		return ""
+	}
+	d := time.Until(time.Unix(unix, 0))
+	if d <= 0 {
+		return "곧"
+	}
+	switch {
+	case d >= 48*time.Hour:
+		return fmt.Sprintf("%d일 뒤", int(d.Hours()/24))
+	case d >= time.Hour:
+		return fmt.Sprintf("%d시간 뒤", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%d분 뒤", int(d.Minutes()))
+	}
+}
+
 func fmtAge(min int) string {
 	if min < 0 {
 		return ""
