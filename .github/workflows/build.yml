@@ -88,5 +88,3 @@ jobs:
         run: |
           test -z "$(gofmt -l .)" || { echo '서식 불일치:'; gofmt -l .; exit 1; }
           go vet ./...
-      - name: 맥 코드 타입체크 (cgo 없이 가능한 범위)
-        run: GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build ./... || true
