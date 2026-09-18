@@ -34,12 +34,15 @@ Claude Code 와 Codex 의 남은 사용량을 **작업표시줄(Windows) · 메�
 새 트레이 아이콘은 기본으로 오버플로(∧) 안에 숨는다. 꺼내는 방법 셋 중 아무거나.
 
 ```powershell
-usage-tray.exe -promote -restart-explorer
+# PowerShell 은 현재 폴더를 PATH 로 찾지 않는다 — `.\` 를 붙이거나 전체 경로를 쓴다
+.\usage-tray.exe -promote -restart-explorer
 ```
 
-가장 빠르다. 자기 아이콘 항목을 찾아 `IsPromoted=1` 을 넣고 explorer 를 재시작한다.
-**앱을 한 번 실행해 아이콘이 뜬 뒤에** 써야 한다 — 그 전에는 레지스트리에 항목이 없다.
-`-restart-explorer` 를 빼면 값만 넣고 다음 로그인부터 적용된다.
+가장 빠르다. 자기 아이콘 항목을 찾아 `IsPromoted=1` 을 넣고, 트레이를 내린 뒤 explorer 를
+재시작하고 트레이를 다시 띄운다 — explorer 를 재시작하면 아이콘 등록이 풀리기 때문이다.
+
+**앱을 한 번 실행해 아이콘이 뜬 뒤에** 써야 한다. 그 전에는 레지스트리에 항목 자체가 없고,
+그 경우 그렇게 알려 준다. `-restart-explorer` 를 빼면 값만 넣고 다음 로그인부터 적용된다.
 
 손으로 하려면 설정 → 개인 설정 → 작업 표시줄 → 시스템 트레이 아이콘에서 켜거나,
 오버플로를 열어 아이콘을 작업표시줄로 끌어다 놓는다.
