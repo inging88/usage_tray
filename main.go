@@ -150,9 +150,15 @@ func main() {
 		s := *state
 		mu.RUnlock()
 		fmt.Println(s.Summary)
-		// 툴팁·메뉴에 뜨는 그대로 — 눈으로 확인할 때 쓴다.
+		// 메뉴에 뜨는 그대로 — 눈으로 확인할 때 쓴다.
 		for _, l := range ownLines(&s) {
 			fmt.Println("  " + l)
+		}
+		// 트레이 툴팁은 63자를 못 넘어 메뉴보다 짧다. 실제로 뜨는 문자열과 길이를 같이 낸다.
+		tip := tooltip(&s)
+		fmt.Printf("툴팁 %d자 (한계 %d)\n", len([]rune(tip)), tipLimit)
+		for _, l := range strings.Split(tip, "\n") {
+			fmt.Println("  | " + l)
 		}
 		return
 	}
@@ -528,18 +534,66 @@ func iconChoice(s *State) (int, color.NRGBA) {
 	}
 }
 
+// 한 줄의 상세도.
+//
+// detailFull 은 메뉴용이다 — 고정폭 글꼴에 길이 제한이 없으니 자리맞춤까지 넣어 가장 자세히.
+// 나머지는 툴팁용이고, 63자 한계(tipLimit 주석) 때문에 처음부터 축약 기준으로 시작한다.
+// 남는 자리가 있어도 상세판으로 올리지 않는다 — 창이 하나인 Codex 만 상세판이 되어 Claude 와
+// 생김새가 달라지는 문제가 있었다(2026-09-18). 두 툴팁이 같아 보이는 쪽을 택했다.
+// "(6일 뒤)" 는 어느 단계에서도 지키고, 자리가 없으면 시각 → 날짜 순으로 버린다.
+type lineDetail int
+
+const (
+	detailFull       lineDetail = iota // 메뉴:   주간   93% 남음 · 리셋 9/25(금) 08:00 (6일 뒤)
+	detailTip                          // 툴팁:   주간 93% · 9/25 08:00 (6일 뒤)
+	detailTipNoClock                   //         주간 93% · 9/25 (6일 뒤)
+	detailTipETA                       //         주간 93% · 6일 뒤
+	detailTipBare                      //         주간 93%
+)
+
 // 툴팁·메뉴에 쓰는 한 줄. "주간  100% 남음 · 리셋 9/25(금) 08:00 (7일 뒤)"
 // 왼쪽을 창 이름으로 맞추고 %를 세 자리 폭으로 채워 위아래가 눈에 정렬돼 보이게 한다.
-func windowLine(label string, w Window) string {
+func windowLine(label string, w Window) string { return windowLineAt(label, w, detailFull) }
+
+func windowLineAt(label string, w Window, d lineDetail) string {
 	if w.Left < 0 {
-		return fmt.Sprintf("%-5s  값 없음", label)
-	}
-	s := fmt.Sprintf("%-5s %3d%% 남음", label, w.Left)
-	if w.ResetAt > 0 {
-		s += " · 리셋 " + fmtResetHuman(w.ResetAt)
-		if u := fmtUntil(w.ResetAt); u != "" {
-			s += " (" + u + ")"
+		if d == detailFull {
+			return fmt.Sprintf("%-5s  값 없음", label)
 		}
+		return label + " 값 없음"
+	}
+
+	// 메뉴판 — 자리맞춤(%-5s)은 고정폭으로 보는 메뉴에서만 쓸모가 있다.
+	if d == detailFull {
+		s := fmt.Sprintf("%-5s %3d%% 남음", label, w.Left)
+		if w.ResetAt > 0 {
+			s += " · 리셋 " + fmtResetKo(w.ResetAt, true)
+			if u := fmtUntil(w.ResetAt); u != "" {
+				s += " (" + u + ")"
+			}
+		}
+		return s
+	}
+
+	// 툴팁판 — 자리맞춤 · "남음" · "리셋" · 요일을 빼고 남은 자리를 시각과 "N일 뒤" 에 쓴다.
+	s := fmt.Sprintf("%s %d%%", label, w.Left)
+	if w.ResetAt <= 0 || d == detailTipBare {
+		return s
+	}
+	eta := fmtUntil(w.ResetAt)
+	switch d {
+	case detailTipETA:
+		if eta == "" {
+			return s + " · " + fmtResetDay(w.ResetAt)
+		}
+		return s + " · " + eta
+	case detailTipNoClock:
+		s += " · " + fmtResetDay(w.ResetAt)
+	default:
+		s += " · " + fmtResetKo(w.ResetAt, false)
+	}
+	if eta != "" {
+		s += " (" + eta + ")"
 	}
 	return s
 }
@@ -557,12 +611,16 @@ func windowName(w Window, fallback string) string {
 // 이 프로세스가 맡은 에이전트만 자세히 낸다 — 아이콘이 에이전트별로 갈렸으므로
 // 툴팁에 남의 값을 섞으면 오히려 읽기 어렵다.
 func agentLines(name string, a *AgentUsage) []string {
+	return agentLinesAt(name, a, detailFull)
+}
+
+func agentLinesAt(name string, a *AgentUsage, d lineDetail) []string {
 	lines := []string{name}
 	if a.Week.Left >= 0 || a.Week.ResetAt > 0 {
-		lines = append(lines, windowLine(windowName(a.Week, "주간"), a.Week))
+		lines = append(lines, windowLineAt(windowName(a.Week, "주간"), a.Week, d))
 	}
 	if a.Short.Left >= 0 || a.Short.ResetAt > 0 {
-		lines = append(lines, windowLine(windowName(a.Short, "5시간"), a.Short))
+		lines = append(lines, windowLineAt(windowName(a.Short, "5시간"), a.Short, d))
 	}
 	var notes []string
 	if a.Limit != "" {
@@ -586,19 +644,33 @@ func agentLines(name string, a *AgentUsage) []string {
 	return lines
 }
 
-func ownLines(s *State) []string {
+func ownLines(s *State) []string { return ownLinesAt(s, detailFull) }
+
+func ownLinesAt(s *State, d lineDetail) []string {
 	if tag() == "codex" || (!s.Claude.Available && s.Codex.Available) {
-		return agentLines("Codex", &s.Codex)
+		return agentLinesAt("Codex", &s.Codex, d)
 	}
-	return agentLines("Claude", &s.Claude)
+	return agentLinesAt("Claude", &s.Claude, d)
 }
 
+// 트레이 툴팁이 실제로 담는 길이. szTip 필드는 128 WCHAR 이지만 셸에 NOTIFYICON_VERSION_4
+// 를 알리지 않으면 64자(63 + 종료 null)만 쓴다 — systray 가 그 상태라서, 126자로 자르던
+// 예전 코드는 아무것도 안 하고 셸이 문장 중간을 잘라 버렸다("5시간  48% 남음 · 리").
+// 그래서 여유 1자를 둔 62자에 맞춰 우리가 먼저 줄인다.
+const tipLimit = 62
+
 func tooltip(s *State) string {
-	t := strings.Join(ownLines(s), "\n")
-	// Windows 툴팁은 127자 제한이다. 바이트로 자르면 한글이 깨지므로 룬 단위로 자른다.
-	r := []rune(t)
-	if len(r) > 126 {
-		t = string(r[:123]) + "..."
+	// 축약 기준(detailTip)에서 시작해 62자에 드는 첫 단계를 쓴다 — 두 에이전트가 같은 형식이다.
+	for d := detailTip; d <= detailTipBare; d++ {
+		t := strings.Join(ownLinesAt(s, d), "\n")
+		if len([]rune(t)) <= tipLimit {
+			return t
+		}
+	}
+	t := strings.Join(ownLinesAt(s, detailTipBare), "\n")
+	// 그래도 넘치면(비고가 길 때) 룬 단위로 자른다 — 바이트로 자르면 한글이 깨진다.
+	if r := []rune(t); len(r) > tipLimit {
+		t = string(r[:tipLimit-1]) + "…"
 	}
 	return t
 }

@@ -79,6 +79,9 @@ type AgentTokens struct {
 	Models7d   []NamedRow `json:"models7d"`
 	Projects7d []NamedRow `json:"projects7d"`
 	Today      Row        `json:"today"`
+	// 7일 창의 전체 합. Models7d · Projects7d 는 상위 6개로 잘리므로 그 합으로는
+	// 화면의 "합계" 를 만들 수 없다(실제보다 작게 나온다). 그래서 따로 센다.
+	Total7d Row `json:"total7d"`
 }
 
 type TokenStats struct {
@@ -352,6 +355,7 @@ func views(agg map[string]*Row, daysBack int) AgentTokens {
 		if day >= since {
 			addTo(models, model, *row)
 			addTo(projs, proj, *row)
+			out.Total7d.add(*row)
 		}
 		if day == today {
 			out.Today.add(*row)
