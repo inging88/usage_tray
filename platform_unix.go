@@ -5,6 +5,7 @@ package main
 // macOS(및 리눅스) 쪽 잡일. macOS 는 전부 OS 기본 명령으로 해결된다 — 추가 설치가 없다.
 
 import (
+	"fmt"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -54,4 +55,9 @@ func openPath(p string) {
 		bin = "xdg-open"
 	}
 	_ = exec.Command(bin, p).Start()
+}
+
+// 작업표시줄 고정은 윈도우 개념이다. 맥 메뉴바 아이콘은 늘 보인다(자리가 모자라면 OS 가 줄인다).
+func promoteTrayIcons(restartExplorer bool) {
+	fmt.Println("-promote 는 윈도우 전용이다. 맥 메뉴바 아이콘은 따로 고정할 필요가 없다.")
 }

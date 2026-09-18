@@ -29,12 +29,23 @@ Claude Code 와 Codex 의 남은 사용량을 **작업표시줄(Windows) · 메�
 2. 더블클릭 → "Windows 의 PC 보호" 가 뜨면 `추가 정보` → `실행` (서명이 없어서 나는 경고다)
 3. 트레이에 링이 생긴다
 
-## 아이콘이 안 보이면
+## 작업표시줄에 항상 보이게
 
-오버플로(∧) 안에 있다. 설정 → 개인 설정 → 작업 표시줄 → 시스템 트레이 아이콘에서 켠다.
-레지스트리로 직접 켜려면 `HKCU\Control Panel\NotifyIconSettings\<id>\IsPromoted = 1`
-(`<id>` 는 각 항목의 `ExecutablePath` 로 찾는다). 아이콘이 한 번 나타난 뒤에야 항목이 생기고,
-바꾼 뒤에는 explorer 를 재시작해야 적용된다.
+새 트레이 아이콘은 기본으로 오버플로(∧) 안에 숨는다. 꺼내는 방법 셋 중 아무거나.
+
+```powershell
+usage-tray.exe -promote -restart-explorer
+```
+
+가장 빠르다. 자기 아이콘 항목을 찾아 `IsPromoted=1` 을 넣고 explorer 를 재시작한다.
+**앱을 한 번 실행해 아이콘이 뜬 뒤에** 써야 한다 — 그 전에는 레지스트리에 항목이 없다.
+`-restart-explorer` 를 빼면 값만 넣고 다음 로그인부터 적용된다.
+
+손으로 하려면 설정 → 개인 설정 → 작업 표시줄 → 시스템 트레이 아이콘에서 켜거나,
+오버플로를 열어 아이콘을 작업표시줄로 끌어다 놓는다.
+
+바뀌는 값은 `HKCU\Control Panel\NotifyIconSettings\<id>\IsPromoted` 하나뿐이다
+(`<id>` 는 실행 파일 경로 해시라 각 항목의 `ExecutablePath` 로 찾는다).
 
 ## 로그인할 때 자동 실행
 
@@ -42,7 +53,7 @@ Claude Code 와 Codex 의 남은 사용량을 **작업표시줄(Windows) · 메�
 
 ## 직접 빌드
 
-Go 1.22+ 만 있으면 된다. 컴파일러는 필요 없다(`CGO_ENABLED=0`).
+Go 1.26+ 만 있으면 된다. 컴파일러는 필요 없다(`CGO_ENABLED=0`).
 
 ```powershell
 git clone https://github.com/inging88/usage_tray.git
@@ -140,6 +151,7 @@ export USAGE_TRAY_CLAUDE_KEYCHAIN_SERVICE="찾은 이름"
 | `-only claude` / `-only codex` | 한쪽만 다룬다 |
 | `-icons <폴더>` | 아이콘 견본을 PNG/ICO 로 떨어뜨린다 |
 | `-notify` | 알림을 한 번 띄워 본다 |
+| `-promote` | 아이콘을 작업표시줄에 고정한다(윈도우). `-restart-explorer` 와 함께 쓰면 바로 적용 |
 
 ## 문제 해결
 

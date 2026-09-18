@@ -95,7 +95,14 @@ func main() {
 	only = flag.String("only", "", "claude 또는 codex 만 다룬다")
 	icons := flag.String("icons", "", "아이콘 견본을 이 폴더에 PNG/ICO 로 떨어뜨리고 끝낸다(확인용)")
 	testNotify := flag.Bool("notify", false, "알림을 한 번 띄워 보고 끝낸다(확인용)")
+	promote := flag.Bool("promote", false, "트레이 아이콘을 작업표시줄에 항상 보이게 하고 끝낸다(윈도우)")
+	restartExplorer := flag.Bool("restart-explorer", false, "-promote 와 함께 쓰면 explorer 를 재시작해 바로 적용한다")
 	flag.Parse()
+
+	if *promote {
+		promoteTrayIcons(*restartExplorer)
+		return
+	}
 
 	if *icons != "" {
 		dumpIcons(*icons)
