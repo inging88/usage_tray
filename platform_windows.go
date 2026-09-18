@@ -111,12 +111,36 @@ func promoteTrayIcons(restartExplorer bool) {
 	fmt.Printf("작업표시줄에 고정했다 (항목 %d개).\n", found)
 
 	if restartExplorer {
+		// explorer 를 재시작하면 떠 있던 트레이 아이콘이 사라진다(앱이 다시 등록해야 한다).
+		// 그래서 순서가 중요하다: 옛 인스턴스를 먼저 내리고, explorer 를 되살린 뒤, 앱을 새로 띄운다.
+		// 자기 자신은 죽이지 않는다 — 죽으면 되살릴 주체가 없다.
+		fmt.Println("트레이를 내린다")
+		kill := exec.Command("taskkill", "/F", "/IM", filepath.Base(exe), "/FI",
+			fmt.Sprintf("PID ne %d", os.Getpid()))
+		hideWindow(kill)
+		_ = kill.Run()
+
 		fmt.Println("explorer 를 재시작한다 — 작업표시줄이 잠깐 사라진다")
-		_ = exec.Command("taskkill", "/F", "/IM", "explorer.exe").Run()
+		k2 := exec.Command("taskkill", "/F", "/IM", "explorer.exe")
+		hideWindow(k2)
+		_ = k2.Run()
 		time.Sleep(2 * time.Second)
-		_ = exec.Command("explorer.exe").Start()
-		fmt.Println("완료")
+		if err := exec.Command("explorer.exe").Start(); err != nil {
+			fmt.Println("explorer 를 못 띄웠다 — 작업 관리자에서 새 작업으로 explorer.exe 를 실행한다:", err)
+		}
+		time.Sleep(3 * time.Second)
+
+		fmt.Println("트레이를 다시 띄운다")
+		again := exec.Command(exe)
+		hideWindow(again)
+		if err := again.Start(); err != nil {
+			fmt.Println("다시 띄우지 못했다 — 직접 실행한다:", err)
+			return
+		}
+		_ = again.Process.Release()
+		fmt.Println("완료 — 몇 초 뒤 작업표시줄에 링이 보인다")
 		return
 	}
 	fmt.Println("적용하려면 explorer 를 재시작하거나 로그아웃/재부팅한다 (-promote -restart-explorer 로 한 번에).")
+	fmt.Println("explorer 재시작 뒤에는 트레이 앱도 다시 실행해야 아이콘이 재등록된다.")
 }
