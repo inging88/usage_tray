@@ -100,12 +100,22 @@ func main() {
 	testNotify := flag.Bool("notify", false, "알림을 한 번 띄워 보고 끝낸다(확인용)")
 	promote := flag.Bool("promote", false, "트레이 아이콘을 작업표시줄에 항상 보이게 하고 끝낸다(윈도우)")
 	restartExplorer := flag.Bool("restart-explorer", false, "-promote 와 함께 쓰면 explorer 를 재시작해 바로 적용한다")
+	install := flag.Bool("install", false, "로그인 자동 실행을 걸고, 아이콘을 꺼내고, 지금 띄운다")
+	uninstall := flag.Bool("uninstall", false, "-install 로 건 자동 실행을 뗀다")
 	flag.Parse()
 	if _, ok := ports[tag()]; !ok {
 		fmt.Fprintln(os.Stderr, "지원하지 않는 -only 값")
 		os.Exit(2)
 	}
 
+	if *install {
+		installStartup()
+		return
+	}
+	if *uninstall {
+		uninstallStartup()
+		return
+	}
 	if *promote {
 		promoteTrayIcons(*restartExplorer)
 		return

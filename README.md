@@ -26,36 +26,38 @@ Claude Code · Codex · Antigravity 의 남은 사용량을 **작업표시줄(Wi
 
 # Windows
 
-## 실행
+## 설치 — 한 줄
 
-1. `usage-tray.exe` 를 아무 폴더에 둔다
-2. 더블클릭 → "Windows 의 PC 보호" 가 뜨면 `추가 정보` → `실행` (서명이 없어서 나는 경고다)
-3. 트레이에 링이 생긴다
-
-## 작업표시줄에 항상 보이게
-
-새 트레이 아이콘은 기본으로 오버플로(∧) 안에 숨는다. 꺼내는 방법 셋 중 아무거나.
+`usage-tray.exe` 를 **계속 둘 폴더**에 놓고(경로가 바뀌면 다시 걸어야 한다) 한 줄만 친다.
 
 ```powershell
 # PowerShell 은 현재 폴더를 PATH 로 찾지 않는다 — `.\` 를 붙이거나 전체 경로를 쓴다
-.\usage-tray.exe -promote -restart-explorer
+.\usage-tray.exe -install
 ```
 
-가장 빠르다. 자기 아이콘 항목을 찾아 `IsPromoted=1` 을 넣고, 트레이를 내린 뒤 explorer 를
-재시작하고 트레이를 다시 띄운다 — explorer 를 재시작하면 아이콘 등록이 풀리기 때문이다.
+이 한 줄이 셋을 한다.
 
-**앱을 한 번 실행해 아이콘이 뜬 뒤에** 써야 한다. 그 전에는 레지스트리에 항목 자체가 없고,
-그 경우 그렇게 알려 준다. `-restart-explorer` 를 빼면 값만 넣고 다음 로그인부터 적용된다.
+1. 시작프로그램에 바로가기를 만든다 → 다음 로그인부터 저절로 뜬다
+2. 아이콘을 오버플로(∧)에서 작업표시줄로 꺼낸다(`IsPromoted=1`)
+3. 트레이를 지금 띄운다
+
+떼려면 `.\usage-tray.exe -uninstall`. 자동 실행만 떼고 아이콘 설정은 건드리지 않는다.
+
+"Windows 의 PC 보호" 가 뜨면 `추가 정보` → `실행` — 서명이 없어서 나는 경고다.
+
+## 어떻게 동작하나
+
+새 트레이 아이콘은 기본으로 오버플로 안에 숨는다. Windows 11 은 아이콘별 표시 여부를
+`HKCU\Control Panel\NotifyIconSettings\<id>\IsPromoted` 로 기억한다(`<id>` 는 실행 파일 경로
+해시라 각 항목의 `ExecutablePath` 로 찾는다). 그 항목은 아이콘이 한 번 뜬 뒤에야 생기므로,
+`-install` 은 항목이 없으면 앱을 먼저 띄워 만들고 기다린다.
+
+**순서가 핵심이다.** 값을 먼저 박고 트레이를 새로 띄우면 셸이 아이콘 등록 시점에 그 값을 읽어
+바로 작업표시줄에 올린다 — explorer 를 재시작할 일이 없다. 값만 따로 넣으려면 `-promote`,
+셸이 값을 안 읽는 드문 경우에만 `-promote -restart-explorer`(작업표시줄이 몇 초 사라진다).
 
 손으로 하려면 설정 → 개인 설정 → 작업 표시줄 → 시스템 트레이 아이콘에서 켜거나,
 오버플로를 열어 아이콘을 작업표시줄로 끌어다 놓는다.
-
-바뀌는 값은 `HKCU\Control Panel\NotifyIconSettings\<id>\IsPromoted` 하나뿐이다
-(`<id>` 는 실행 파일 경로 해시라 각 항목의 `ExecutablePath` 로 찾는다).
-
-## 로그인할 때 자동 실행
-
-`Win+R` → `shell:startup` → 그 폴더에 `usage-tray.exe` 바로가기를 넣는다.
 
 ## 직접 빌드
 
@@ -82,14 +84,18 @@ powershell -ExecutionPolicy Bypass -File build.ps1 -Run
 ```bash
 unzip UsageTray-macos-universal.zip
 xattr -dr com.apple.quarantine UsageTray.app   # 서명이 ad-hoc 이라 한 번 필요하다
-open UsageTray.app
+mv UsageTray.app /Applications/               # 계속 둘 자리로 옮긴다
+/Applications/UsageTray.app/Contents/MacOS/usage-tray -install
 ```
 
-메뉴바에 링이 생긴다. Dock 아이콘은 없다(`LSUIElement`).
+마지막 줄이 로그인 항목에 등록하고 앱을 띄운다. 메뉴바에 링이 생기고, Dock 아이콘은 없다
+(`LSUIElement`). 처음 한 번 맥이 **'시스템 이벤트' 제어 권한**을 물으면 허용한다 — 로그인
+항목을 넣는 데 필요하다. 거절했다면 시스템 설정 → 개인정보 보호 및 보안 → 자동화 에서 켠다.
 
-## 로그인할 때 자동 실행
+떼려면 `-uninstall`. 앱을 옮겼다면 새 자리에서 `-install` 을 다시 한 번 돌린다(옛 항목은
+자동으로 지운다).
 
-시스템 설정 → 일반 → 로그인 항목 → `+` → `UsageTray.app`
+손으로 하려면 시스템 설정 → 일반 → 로그인 항목 → `+` → `UsageTray.app`
 
 ## 직접 빌드
 
@@ -176,13 +182,17 @@ Antigravity 는 앱이 떠 있을 때만 잡히고, 자격증명을 루프백 �
 | `-only claude` / `-only codex` / `-only antigravity` | 한쪽만 다룬다 |
 | `-icons <폴더>` | 아이콘 견본을 PNG/ICO 로 떨어뜨린다 |
 | `-notify` | 알림을 한 번 띄워 본다 |
-| `-promote` | 아이콘을 작업표시줄에 고정한다(윈도우). `-restart-explorer` 와 함께 쓰면 바로 적용 |
+| `-install` | 로그인 자동 실행 + 아이콘 꺼내기 + 지금 띄우기를 한 번에 |
+| `-uninstall` | `-install` 로 건 자동 실행을 뗀다 |
+| `-promote` | 아이콘을 작업표시줄에 고정한다(윈도우). `-restart-explorer` 와 함께 쓰면 explorer 까지 재시작 |
 
 ## 문제 해결
 
 | 증상 | 조치 |
 |---|---|
 | 아무것도 안 뜬다 | 자격증명이 없다. `usage-tray -once` 로 확인 |
+| 링이 오버플로(∧) 안에만 있다 | `-install` 을 한 번 돌린다(윈도우) |
+| 로그인해도 안 뜬다 | 실행 파일을 옮겼다면 새 자리에서 `-install` 을 다시 돌린다 |
 | 이미 실행 중이라고 나온다 | 그 포트를 쓰는 인스턴스가 이미 있다 |
 | Codex 가 `기록 N분 전` 으로만 나온다 | 토큰이 만료됐을 수 있다. `codex` 를 한 번 실행 |
 | 값이 안 변한다 | 최소 간격 탓이다(3분). 우클릭 → 지금 갱신 |
