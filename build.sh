@@ -38,8 +38,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
   <key>CFBundleName</key><string>UsageTray</string>
   <key>CFBundleDisplayName</key><string>Usage Tray</string>
   <key>CFBundleIdentifier</key><string>local.usage-tray</string>
-  <key>CFBundleVersion</key><string>1.0</string>
-  <key>CFBundleShortVersionString</key><string>1.0</string>
+  <key>CFBundleVersion</key><string>1.1.0</string>
+  <key>CFBundleShortVersionString</key><string>1.1.0</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleExecutable</key><string>usage-tray</string>
   <key>LSUIElement</key><true/>

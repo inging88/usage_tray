@@ -8,12 +8,15 @@ package main
 // Codex 는 양쪽 다 ~/.codex/auth.json 이므로 분기가 없다.
 
 import (
+	"context"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 )
 
 func homeDir() string {
@@ -25,7 +28,13 @@ func homeDir() string {
 }
 
 // Claude Code 트랜스크립트 루트 — 양쪽 다 ~/.claude/projects 다.
-func claudeProjectsDir() string { return filepath.Join(homeDir(), ".claude", "projects") }
+func claudeConfigDir() string {
+	if d := os.Getenv("CLAUDE_CONFIG_DIR"); d != "" {
+		return d
+	}
+	return filepath.Join(homeDir(), ".claude")
+}
+func claudeProjectsDir() string { return filepath.Join(claudeConfigDir(), "projects") }
 
 func codexSessionsDir() string { return filepath.Join(homeDir(), ".codex", "sessions") }
 
@@ -35,6 +44,10 @@ func codexConfigPath() string { return filepath.Join(homeDir(), ".codex", "confi
 
 // 데이터·로그를 두는 곳. Windows 는 %LOCALAPPDATA%, macOS 는 ~/Library/Application Support.
 func dataDir() string {
+	if d := os.Getenv("USAGE_TRAY_DATA_DIR"); d != "" {
+		_ = os.MkdirAll(d, 0o700)
+		return d
+	}
 	var base string
 	switch runtime.GOOS {
 	case "windows":
@@ -62,6 +75,10 @@ type claudeCreds struct {
 }
 
 func parseClaudeCreds(b []byte) string {
+	// security can return non-ASCII keychain data as hexadecimal.
+	if decoded, err := hex.DecodeString(strings.TrimSpace(string(b))); err == nil && len(decoded) > 0 {
+		b = decoded
+	}
 	var c claudeCreds
 	if err := json.Unmarshal(b, &c); err != nil {
 		return ""
@@ -76,7 +93,7 @@ func parseClaudeCreds(b []byte) string {
 // 파일 후보 — 양쪽 OS 에서 쓰이는 자리를 모두 본다.
 func claudeCredFiles() []string {
 	h := homeDir()
-	files := []string{filepath.Join(h, ".claude", ".credentials.json")}
+	files := []string{filepath.Join(claudeConfigDir(), ".credentials.json")}
 	if runtime.GOOS == "windows" {
 		if la := os.Getenv("LOCALAPPDATA"); la != "" {
 			files = append([]string{filepath.Join(la, "Claude Code", "credentials.json")}, files...)
@@ -101,7 +118,9 @@ func keychainSecret(service string) string {
 	if runtime.GOOS != "darwin" {
 		return ""
 	}
-	out, err := exec.Command("security", "find-generic-password", "-s", service, "-w").Output()
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "/usr/bin/security", "find-generic-password", "-s", service, "-w").Output()
 	if err != nil {
 		return ""
 	}
@@ -132,12 +151,12 @@ func claudeToken() string {
 			if t := parseClaudeCreds([]byte(raw)); t != "" {
 				return t
 			}
-			if strings.HasPrefix(raw, "sk-") || len(raw) > 40 && !strings.HasPrefix(raw, "{") {
+			if strings.HasPrefix(raw, "sk-ant-") {
 				return raw
 			}
 		}
 	}
-	return ""
+	return claudeDesktopToken()
 }
 
 type codexAuth struct {
@@ -161,5 +180,20 @@ func codexToken() (token, account string) {
 
 // 자격증명이 있으면 '쓴다' 로 본다. 조회 실패로는 뒤집지 않는다(끈적한 판정).
 func detectAgents() (claude, codex bool) {
-	return claudeToken() != "", func() bool { t, _ := codexToken(); return t != "" }()
+	// Discovery must not read Keychain secrets or hide installed clients after an auth failure.
+	_, projectsErr := os.Stat(claudeProjectsDir())
+	claude = projectsErr == nil || os.Getenv("CLAUDE_CODE_OAUTH_TOKEN") != ""
+	if _, err := os.Stat(filepath.Join(homeDir(), "Library", "Application Support", "Claude", "config.json")); err == nil {
+		claude = true
+	}
+	if !claude {
+		for _, p := range claudeCredFiles() {
+			if _, err := os.Stat(p); err == nil {
+				claude = true
+				break
+			}
+		}
+	}
+	_, err := os.Stat(codexAuthPath())
+	return claude, err == nil
 }

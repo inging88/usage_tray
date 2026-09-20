@@ -32,17 +32,20 @@ type Window struct {
 }
 
 type AgentUsage struct {
-	Available bool   `json:"available"`
-	OK        bool   `json:"ok"`
-	Src       string `json:"src"` // live / api / rollout / cache
-	Short     Window `json:"short"`
-	Week      Window `json:"week"`
-	Limit     string `json:"limit"`
-	Plan      string `json:"plan"`
-	Model     string `json:"model"`
-	Effort    string `json:"effort"`
-	AgeMin    int    `json:"ageMin"` // -1 = 모름, 0 = 방금
-	Extra     string `json:"extra"`
+	Models    []Window  `json:"models,omitempty"`
+	Error     string    `json:"error,omitempty"`
+	FetchedAt time.Time `json:"fetchedAt,omitempty"`
+	Available bool      `json:"available"`
+	OK        bool      `json:"ok"`
+	Src       string    `json:"src"` // live / api / rollout / cache
+	Short     Window    `json:"short"`
+	Week      Window    `json:"week"`
+	Limit     string    `json:"limit"`
+	Plan      string    `json:"plan"`
+	Model     string    `json:"model"`
+	Effort    string    `json:"effort"`
+	AgeMin    int       `json:"ageMin"` // -1 = 모름, 0 = 방금
+	Extra     string    `json:"extra"`
 }
 
 func emptyAgent() AgentUsage {
@@ -146,6 +149,9 @@ func leftFrom(util *float64) int {
 	if l < 0 {
 		l = 0
 	}
+	if l > 100 {
+		l = 100
+	}
 	return l
 }
 
@@ -218,11 +224,16 @@ func fetchClaude() AgentUsage {
 
 	tok := claudeToken()
 	if tok == "" {
+		u.Error = "Claude 앱을 열어 로그인하거나 키체인 접근을 허용해 주세요"
 		logf("claude: 토큰 없음")
+		if cached, ok := claudeDesktopHistory(); ok {
+			return cached
+		}
 		return u
 	}
 	// (3) 429 로 쉬는 중이면 부르지 않는다 — 부르면 백오프가 늘어날 뿐이다.
 	if time.Now().Before(claudeBackoffUntil) {
+		u.Error = "요청 제한으로 잠시 대기 중입니다"
 		return u
 	}
 	var r claudeUsageResp
@@ -233,11 +244,18 @@ func fetchClaude() AgentUsage {
 		"User-Agent":     "usage-tray/1.0",
 	}, &r)
 	if err != nil {
+		u.Error = fmt.Sprintf("사용량 조회 실패 (HTTP %d)", code)
+		if code == 401 {
+			u.Error = "Claude 로그인이 만료되었습니다. Claude 앱에서 다시 로그인해 주세요"
+		}
 		if code == 429 || code == 503 {
 			if claudeBackoff == 0 {
 				claudeBackoff = 5 * time.Minute
 			} else if claudeBackoff < 30*time.Minute {
 				claudeBackoff *= 2
+				if claudeBackoff > 30*time.Minute {
+					claudeBackoff = 30 * time.Minute
+				}
 			}
 			claudeBackoffUntil = time.Now().Add(claudeBackoff)
 			logf("claude api %d — %v 쉰다", code, claudeBackoff)
@@ -260,6 +278,7 @@ func fillClaude(u *AgentUsage, r claudeUsageResp) {
 	}
 	u.OK = u.Short.Left >= 0 || u.Week.Left >= 0
 	u.AgeMin = 0
+	u.FetchedAt = time.Now()
 }
 
 // ---------------------------------------------------------------- Codex
@@ -278,7 +297,7 @@ type codexUsageResp struct {
 		Primary      *codexWindow `json:"primary_window"`
 		Secondary    *codexWindow `json:"secondary_window"`
 	} `json:"rate_limit"`
-	ReachedType *string `json:"rate_limit_reached_type"`
+	ReachedType json.RawMessage `json:"rate_limit_reached_type"`
 }
 
 func fetchCodex() AgentUsage {
@@ -313,8 +332,10 @@ func fetchCodex() AgentUsage {
 	if r.RateLimit.LimitReached {
 		u.Limit = "rate_limit"
 	}
-	if r.ReachedType != nil && *r.ReachedType != "" {
-		u.Limit = *r.ReachedType
+	// This optional field can be null, a string, or an object; it must never reject usage windows.
+	var reached string
+	if json.Unmarshal(r.ReachedType, &reached) == nil && reached != "" {
+		u.Limit = reached
 	}
 	// 창은 primary/secondary 이름이 아니라 길이로 분류한다 — 계정마다 뜻이 다르다.
 	for _, w := range []*codexWindow{r.RateLimit.Primary, r.RateLimit.Secondary} {
@@ -332,6 +353,7 @@ func fetchCodex() AgentUsage {
 	}
 	u.OK = u.Week.Left >= 0 || u.Short.Left >= 0 || u.Limit != ""
 	u.AgeMin = 0
+	u.FetchedAt = time.Now()
 	u.Model, u.Effort = codexConfigDefaults()
 	return u
 }

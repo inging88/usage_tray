@@ -16,6 +16,7 @@ import (
 	"flag"
 	"fmt"
 	"image/color"
+	"maps"
 	"net"
 	"net/http"
 	"os"
@@ -35,7 +36,7 @@ const (
 
 // 에이전트마다 프로세스를 하나씩 띄운다 — 트레이 API 가 프로세스당 아이콘 1개만 주기 때문이다.
 // 포트도 상태 파일도 에이전트별로 갈라야 서로 밟지 않는다.
-var ports = map[string]string{"claude": "127.0.0.1:47113", "codex": "127.0.0.1:47114", "": "127.0.0.1:47113"}
+var ports = map[string]string{"claude": "127.0.0.1:47113", "codex": "127.0.0.1:47114", "antigravity": "127.0.0.1:47115", "": "127.0.0.1:47113"}
 
 // 이 프로세스가 맡은 에이전트("claude" / "codex" / "" = 둘 다 한 창에).
 func tag() string {
@@ -55,13 +56,15 @@ func suffix() string {
 func listenAddr() string { return ports[tag()] }
 
 type State struct {
-	Updated time.Time  `json:"updated"`
-	Claude  AgentUsage `json:"claude"`
-	Codex   AgentUsage `json:"codex"`
-	Summary string     `json:"summary"`
-	Agents  struct {
-		Claude bool `json:"claude"`
-		Codex  bool `json:"codex"`
+	Updated     time.Time  `json:"updated"`
+	Antigravity AgentUsage `json:"antigravity"`
+	Claude      AgentUsage `json:"claude"`
+	Codex       AgentUsage `json:"codex"`
+	Summary     string     `json:"summary"`
+	Agents      struct {
+		Antigravity bool `json:"antigravity"`
+		Claude      bool `json:"claude"`
+		Codex       bool `json:"codex"`
 	} `json:"agents"`
 	Alerts map[string]bool `json:"alerts"`
 }
@@ -71,7 +74,7 @@ var (
 	mu      sync.RWMutex
 	state   = &State{Alerts: map[string]bool{}}
 	tokens  *TokenStats
-	agents  struct{ claude, codex bool }
+	agents  struct{ claude, codex, antigravity bool }
 	logFile = filepath.Join(dataDir(), "usage-tray.log")
 )
 
@@ -92,12 +95,16 @@ func main() {
 	once := flag.Bool("once", false, "한 번 수집해 한 줄 출력하고 끝낸다")
 	scan := flag.Bool("tokens", false, "토큰만 스캔해 결과를 출력하고 끝낸다")
 	// 둘 다 쓰지만 한쪽만 보고 싶을 때, 그리고 단일 에이전트 화면을 확인할 때.
-	only = flag.String("only", "", "claude 또는 codex 만 다룬다")
+	only = flag.String("only", "", "claude, codex 또는 antigravity 만 다룬다")
 	icons := flag.String("icons", "", "아이콘 견본을 이 폴더에 PNG/ICO 로 떨어뜨리고 끝낸다(확인용)")
 	testNotify := flag.Bool("notify", false, "알림을 한 번 띄워 보고 끝낸다(확인용)")
 	promote := flag.Bool("promote", false, "트레이 아이콘을 작업표시줄에 항상 보이게 하고 끝낸다(윈도우)")
 	restartExplorer := flag.Bool("restart-explorer", false, "-promote 와 함께 쓰면 explorer 를 재시작해 바로 적용한다")
 	flag.Parse()
+	if _, ok := ports[tag()]; !ok {
+		fmt.Fprintln(os.Stderr, "지원하지 않는 -only 값")
+		os.Exit(2)
+	}
 
 	if *promote {
 		promoteTrayIcons(*restartExplorer)
@@ -115,10 +122,15 @@ func main() {
 	}
 
 	agents.claude, agents.codex = detectAgents()
+	agents.antigravity = detectAntigravity()
 	switch *only {
 	case "claude":
+		agents.antigravity = false
 		agents.codex = false
+	case "antigravity":
+		agents.claude, agents.codex = false, false
 	case "codex":
+		agents.antigravity = false
 		agents.claude = false
 	}
 	logf("agents: claude=%v codex=%v", agents.claude, agents.codex)
@@ -130,7 +142,7 @@ func main() {
 		return
 	}
 
-	if !agents.claude && !agents.codex {
+	if !agents.claude && !agents.codex && !agents.antigravity {
 		fmt.Println("쓸 수 있는 에이전트가 없다 (Claude Code · Codex 자격증명 없음)")
 		logf("no agent credentials found; exit")
 		return
@@ -139,10 +151,7 @@ func main() {
 	// 둘 다 쓰는데 -only 가 없으면, 에이전트별로 자식을 하나씩 띄우고 이 프로세스는 빠진다.
 	// 아이콘이 둘로 갈라지는 지점이 여기다. 수집(refresh)보다 먼저 해야 부모가 상태 파일을
 	// 남기지 않는다 — 접미사 없는 state.json 은 한쪽만 쓰는 사람의 파일이다.
-	if tag() == "" && agents.claude && agents.codex && !*once {
-		spawnChildren()
-		return
-	}
+	// Use one process and the original 47113 dashboard for all installed providers.
 
 	refresh()
 	if *once {
@@ -170,12 +179,12 @@ func main() {
 		return
 	}
 	go serve(ln)
-	go func() {
-		tokens = scanTokens(agents.claude, agents.codex)
+	go func(claude, codex bool) {
+		t := scanTokens(claude, codex)
 		mu.Lock()
 		defer mu.Unlock()
-		_ = tokens
-	}()
+		tokens = t
+	}(agents.claude, agents.codex)
 
 	systray.Run(onReady, func() { logf("exit") })
 }
@@ -200,24 +209,35 @@ func serve(ln net.Listener) {
 
 // 조회가 실패했을 때 화면을 비우지 않는다 — 직전 정상값을 그대로 두고 나이만 붙인다.
 // 간헐적인 429·네트워크 오류에 아이콘이 회색 '값 없음' 으로 깜빡이는 걸 막는 장치다.
+func cachedUsage(u AgentUsage) AgentUsage {
+	if !u.FetchedAt.IsZero() {
+		u.AgeMin = int(time.Since(u.FetchedAt).Minutes())
+	}
+	return u
+}
 func keepLastGood(cur, prev AgentUsage, prevAt time.Time) AgentUsage {
 	if cur.OK || !prev.OK || prevAt.IsZero() {
 		return cur
 	}
 	out := prev
 	out.Src = "직전값"
-	out.AgeMin = int(time.Since(prevAt).Minutes())
+	if prev.FetchedAt.IsZero() {
+		prev.FetchedAt = prevAt
+	}
+	out.FetchedAt = prev.FetchedAt
+	out.AgeMin = int(time.Since(prev.FetchedAt).Minutes())
+	out.Error = cur.Error
 	return out
 }
 
-var lastFetch struct{ claude, codex time.Time }
+var lastFetch struct{ claude, codex, antigravity time.Time }
 
 func refresh() {
 	mu.RLock()
 	prevState := *state
 	mu.RUnlock()
 
-	c, x := emptyAgent(), emptyAgent()
+	c, x, a := cachedUsage(prevState.Claude), cachedUsage(prevState.Codex), cachedUsage(prevState.Antigravity)
 	if agents.claude {
 		// 최소 간격을 지킨다. 그 사이에는 직전값을 그대로 쓴다(아래 keepLastGood).
 		if time.Since(lastFetch.claude) >= claudePollMin {
@@ -233,12 +253,20 @@ func refresh() {
 		}
 		x = keepLastGood(x, prevState.Codex, prevState.Updated)
 	}
+	if agents.antigravity {
+		if time.Since(lastFetch.antigravity) >= 2*time.Minute {
+			lastFetch.antigravity = time.Now()
+			a = fetchAntigravity()
+		}
+		a = keepLastGood(a, prevState.Antigravity, prevState.Updated)
+	}
 	mu.Lock()
 	prev := state.Alerts
 	if prev == nil {
 		prev = map[string]bool{}
 	}
-	state = &State{Updated: time.Now(), Claude: c, Codex: x, Alerts: prev}
+	state = &State{Updated: time.Now(), Claude: c, Codex: x, Antigravity: a, Alerts: prev}
+	state.Agents.Antigravity = agents.antigravity
 	state.Agents.Claude = agents.claude
 	state.Agents.Codex = agents.codex
 	state.Summary = summarize(state)
@@ -281,6 +309,13 @@ func summarize(s *State) string {
 			parts = append(parts, "codex "+strings.Join(p, " "))
 		}
 	}
+	if s.Antigravity.Available {
+		if s.Antigravity.Short.Left >= 0 {
+			parts = append(parts, fmt.Sprintf("antigravity 최소 %d%%", s.Antigravity.Short.Left))
+		} else {
+			parts = append(parts, "antigravity 조회 대기")
+		}
+	}
 	return strings.Join(parts, " | ")
 }
 
@@ -298,6 +333,9 @@ func mergedState() State {
 	s := *state
 	mu.RUnlock()
 	for _, other := range []string{"claude", "codex"} {
+		if tag() == "" {
+			break
+		}
 		if other == tag() {
 			continue
 		}
@@ -336,6 +374,9 @@ func mergedTokens() *TokenStats {
 		*out = *t
 	}
 	for _, other := range []string{"claude", "codex"} {
+		if tag() == "" {
+			break
+		}
 		if other == tag() {
 			continue
 		}
@@ -380,6 +421,7 @@ var thresholds = []threshold{
 }
 
 func checkAlerts(s *State) {
+	s.Alerts = maps.Clone(s.Alerts)
 	changed := false
 	for _, t := range thresholds {
 		if !t.on(s) {
@@ -426,7 +468,7 @@ func checkAlerts(s *State) {
 func onReady() {
 	// 맡은 에이전트의 창을 줄마다 하나씩. 클릭 대상이 아니므로 비활성으로 둔다.
 	infoItems := []*systray.MenuItem{}
-	for i := 0; i < 4; i++ {
+	for i := 0; i < 14; i++ {
 		it := systray.AddMenuItem(" ", "")
 		it.Disable()
 		it.Hide()
@@ -477,6 +519,9 @@ func onReady() {
 					agents.codex = agents.codex || x
 					logf("agent appeared: claude=%v codex=%v", agents.claude, agents.codex)
 				}
+				if tag() == "" {
+					agents.antigravity = agents.antigravity || detectAntigravity()
+				}
 				refresh()
 				paint()
 			case <-tokenTick.C:
@@ -487,6 +532,9 @@ func onReady() {
 			case <-mDetail.ClickedCh:
 				openURL("http://" + listenAddr() + "/")
 			case <-mRefresh.ClickedCh:
+				if tag() == "" {
+					agents.antigravity = agents.antigravity || detectAntigravity()
+				}
 				refresh()
 				paint()
 				t := scanTokens(agents.claude, agents.codex)
@@ -510,28 +558,23 @@ func onReady() {
 
 // 아이콘 하나에 무엇을 띄우나 — 급한 쪽(남은량이 적은 쪽).
 func iconChoice(s *State) (int, color.NRGBA) {
-	cl, xl := -1, -1
-	if s.Claude.Available {
-		cl = s.Claude.Week.Left
-	}
-	if s.Codex.Available {
-		xl = s.Codex.Week.Left
-	}
-	switch {
-	case cl < 0 && xl < 0:
-		if s.Claude.Available {
-			return -1, colClaude
+	best, brand := -1, colCodex
+	for _, v := range []struct {
+		u     AgentUsage
+		color color.NRGBA
+	}{{s.Claude, colClaude}, {s.Codex, colCodex}, {s.Antigravity, colAntigravity}} {
+		if !v.u.Available {
+			continue
 		}
-		return -1, colCodex
-	case xl < 0:
-		return cl, colClaude
-	case cl < 0:
-		return xl, colCodex
-	case cl <= xl:
-		return cl, colClaude
-	default:
-		return xl, colCodex
+		left := v.u.Week.Left
+		if left < 0 {
+			left = v.u.Short.Left
+		}
+		if best < 0 || (left >= 0 && left < best) {
+			best, brand = left, v.color
+		}
 	}
+	return best, brand
 }
 
 // 한 줄의 상세도.
@@ -620,14 +663,19 @@ func agentLinesAt(name string, a *AgentUsage, d lineDetail) []string {
 		lines = append(lines, windowLineAt(windowName(a.Week, "주간"), a.Week, d))
 	}
 	if a.Short.Left >= 0 || a.Short.ResetAt > 0 {
-		lines = append(lines, windowLineAt(windowName(a.Short, "5시간"), a.Short, d))
+		lines = append(lines, windowLineAt(windowName(a.Short, a.Short.Label), a.Short, d))
 	}
 	var notes []string
+	if a.Error != "" && d == detailFull {
+		notes = append(notes, a.Error)
+	}
 	if a.Limit != "" {
 		notes = append(notes, "한도 도달")
 	}
 	switch {
 	// 갓 받은 캐시는 live 와 다를 게 없다 — 굳이 알리지 않는다. 묵은 것만 밝힌다.
+	case a.Src == "앱 기록":
+		notes = append(notes, "앱 기록 "+fmtAge(a.AgeMin)+" 전")
 	case a.Src == "직전값":
 		notes = append(notes, "직전값 "+fmtAge(a.AgeMin)+" 전")
 	case strings.HasPrefix(a.Src, "캐시") && a.AgeMin >= 2:
@@ -647,10 +695,16 @@ func agentLinesAt(name string, a *AgentUsage, d lineDetail) []string {
 func ownLines(s *State) []string { return ownLinesAt(s, detailFull) }
 
 func ownLinesAt(s *State, d lineDetail) []string {
-	if tag() == "codex" || (!s.Claude.Available && s.Codex.Available) {
-		return agentLinesAt("Codex", &s.Codex, d)
+	var lines []string
+	for _, v := range []struct {
+		name string
+		u    *AgentUsage
+	}{{"Claude", &s.Claude}, {"Codex", &s.Codex}, {"Antigravity", &s.Antigravity}} {
+		if v.u.Available {
+			lines = append(lines, agentLinesAt(v.name, v.u, d)...)
+		}
 	}
-	return agentLinesAt("Claude", &s.Claude, d)
+	return lines
 }
 
 // 트레이 툴팁이 실제로 담는 길이. szTip 필드는 128 WCHAR 이지만 셸에 NOTIFYICON_VERSION_4

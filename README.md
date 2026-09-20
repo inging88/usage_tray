@@ -1,11 +1,14 @@
 # usage_tray
 
-Claude Code 와 Codex 의 남은 사용량을 **작업표시줄(Windows) · 메뉴바(macOS)** 에 띄운다.
+Claude Code · Codex · Antigravity 의 남은 사용량을 **작업표시줄(Windows) · 메뉴바(macOS)** 에 띄운다.
 
-- 링 게이지 하나 = 에이전트 하나. 링 길이가 주간 남은 %, 20% 밑이면 빨강
-- 마우스를 올리면 창별 남은량과 리셋 시각, 클릭하면 상세 화면(브라우저)
+- 링 게이지 하나에 가장 급한 에이전트를 띄운다. 링 길이가 남은 %, 20% 밑이면 빨강
+- 마우스를 올리면 에이전트별 창과 리셋 시각, 클릭하면 셋을 합친 상세 화면(브라우저)
 - 남은량이 임계값을 넘으면 알림 한 번
-- **쓰는 에이전트만 나온다.** 둘 다 없으면 실행되지 않는다
+- **쓰는 에이전트만 나온다.** 하나도 없으면 실행되지 않는다
+
+0.3.0 에서 실행 방식이 바뀌었다 — 에이전트마다 프로세스 하나(링 여러 개)에서 한 프로세스에
+링 하나로 합쳤다. 바뀐 점과 연결 조건은 [UPGRADE.md](UPGRADE.md) 를 먼저 읽는다.
 
 설치 과정도 설정 파일도 없다. 이미 로그인해 둔 자격증명을 읽을 뿐이고, 자기 계정의 자기
 사용량만 보인다.
@@ -66,8 +69,9 @@ powershell -ExecutionPolicy Bypass -File build.ps1 -Run
 
 ## 파일이 놓이는 곳
 
-`%LOCALAPPDATA%\usage-tray\` — `state-<agent>.json` · `status-<agent>.txt` ·
-`tokens-<agent>.json` · `usage-tray.log`. 지울 때는 실행 파일과 이 폴더만 삭제하면 된다.
+`%LOCALAPPDATA%\usage-tray\` — `state.json` · `status.txt` · `tokens.json` ·
+`usage-tray.log`. 지울 때는 실행 파일과 이 폴더만 삭제하면 된다.
+`USAGE_TRAY_DATA_DIR` 을 주면 그 폴더를 대신 쓴다(검증용).
 
 ---
 
@@ -123,8 +127,11 @@ export USAGE_TRAY_CLAUDE_KEYCHAIN_SERVICE="찾은 이름"
 |---|---|
 | Claude | `api.anthropic.com/api/oauth/usage` |
 | Codex | `chatgpt.com/backend-api/codex/usage` |
+| Antigravity | 로컬에서 도는 Antigravity 언어 서버 (`127.0.0.1` 루프백, macOS 만) |
 
-둘 다 비공개 경로다. 실패하면 로컬 기록으로 폴백하고 화면에 출처를 표시한다.
+Claude · Codex 는 비공개 경로다. 실패하면 로컬 기록으로 폴백하고 화면에 출처를 표시한다.
+Antigravity 는 앱이 떠 있을 때만 잡히고, 자격증명을 루프백 밖으로 보내지 않으며 리디렉션도
+따르지 않는다. 모델별 잔여 한도만 읽고 토큰 수나 과거 사용량은 수집하지 않는다.
 
 호출은 아낀다 — statusline 이 받아 둔 캐시가 2분 이내면 그걸 쓰고, 직접 부를 때도 최소
 간격(Claude 3분 · Codex 2분)을 지키며, 429 를 받으면 5분부터 두 배씩 최대 30분 쉰다.
@@ -137,13 +144,28 @@ export USAGE_TRAY_CLAUDE_KEYCHAIN_SERVICE="찾은 이름"
 | Claude | `%LOCALAPPDATA%\Claude Code\credentials.json` → `~\.claude\.credentials.json` | `~/.claude/.credentials.json` → `~/Library/Application Support/Claude Code/credentials.json` → Keychain |
 | Codex | `~\.codex\auth.json` | `~/.codex/auth.json` |
 
-`CLAUDE_CODE_OAUTH_TOKEN` 이 있으면 그게 우선이다.
+`CLAUDE_CODE_OAUTH_TOKEN` 이 있으면 그게 우선이고, `CLAUDE_CONFIG_DIR` 을 주면 `~/.claude`
+대신 그 폴더를 본다.
 
-## 아이콘이 에이전트마다 하나인 이유
+맥에서는 파일과 Keychain 에서 못 찾으면 Claude 데스크톱 앱의 OAuth 캐시
+(`~/Library/Application Support/Claude/config.json`)를 마지막으로 본다. Electron safeStorage
+로 잠긴 **지정된 필드만** 메모리에서 푼다 — 브라우저 쿠키나 Keychain 전체를 뒤지지 않고,
+복호화 키와 토큰은 파일에도 로그에도 남기지 않는다. macOS 가 `Claude Safe Storage` 접근을
+물으면 허용해야 한다. 그마저 막히면 같은 앱의 24시간 이내 사용 기록
+(`plan-usage-history.json`)을 '앱 기록' 으로 표시한다 — 실시간 조회가 아니고 리셋 시각이
+없어 미확인으로 나온다.
 
-트레이 API 가 프로세스당 아이콘 1개만 허용한다. 그래서 실행 파일이 자기 자신을
-`-only claude` · `-only codex` 로 두 번 띄우고 부모는 빠진다. 상세 화면은 어느 쪽을 눌러도
-둘을 합쳐 보여 준다(claude 47113 · codex 47114).
+## 아이콘이 하나인 이유
+
+트레이 API 가 프로세스당 아이콘 1개만 허용한다. 예전에는 그래서 에이전트마다 프로세스를
+하나씩 띄웠는데, macOS 는 그 방식으로 메뉴바 아이콘이 아예 뜨지 않았다 — `.app` 본체가
+자식을 띄우고 빠지면 LaunchServices 가 앱이 끝난 것으로 보고, 번들 밖에서 도는 자식은
+`NSStatusItem` 을 못 얻기 때문이다.
+
+그래서 0.3.0 부터는 프로세스 하나가 링 하나를 띄우고, 그 링에 **남은량이 가장 적은**
+에이전트를 그린다(색이 곧 어느 쪽인지 알려 준다). 툴팁과 상세 화면(47113)에는 쓰는
+에이전트를 모두 담는다. `-only` 로 띄우면 예전처럼 한 에이전트만 맡는다
+(claude 47113 · codex 47114 · antigravity 47115).
 
 ## 플래그
 
@@ -151,7 +173,7 @@ export USAGE_TRAY_CLAUDE_KEYCHAIN_SERVICE="찾은 이름"
 |---|---|
 | `-once` | 한 줄 요약과 툴팁 내용을 출력하고 끝낸다 |
 | `-tokens` | 토큰 집계를 JSON 으로 출력 |
-| `-only claude` / `-only codex` | 한쪽만 다룬다 |
+| `-only claude` / `-only codex` / `-only antigravity` | 한쪽만 다룬다 |
 | `-icons <폴더>` | 아이콘 견본을 PNG/ICO 로 떨어뜨린다 |
 | `-notify` | 알림을 한 번 띄워 본다 |
 | `-promote` | 아이콘을 작업표시줄에 고정한다(윈도우). `-restart-explorer` 와 함께 쓰면 바로 적용 |

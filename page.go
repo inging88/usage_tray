@@ -136,8 +136,9 @@ type agentMark struct {
 }
 
 var (
-	markClaude = agentMark{"Claude", colClaude}
-	markCodex  = agentMark{"Codex", colCodex}
+	markAntigravity = agentMark{"Antigravity", colAntigravity}
+	markClaude      = agentMark{"Claude", colClaude}
+	markCodex       = agentMark{"Codex", colCodex}
 )
 
 // 두 에이전트의 마크를 인라인 SVG 로 그린다. 파일을 읽지 않으므로 단일 실행파일 그대로다.
@@ -146,6 +147,9 @@ var (
 // Codex — 겹친 타원 3개(꽃 모양).
 // 실제 배포 로고 파일이 있으면 이 함수만 바꿔 끼우면 된다.
 func agentSVG(name string) string {
+	if name == "Antigravity" {
+		return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 19L12 4l9 15M7 14h10" fill="none" stroke="currentColor" stroke-width="2.5"/></svg>`
+	}
 	if name == "Codex" {
 		return `<svg viewBox="0 0 24 24" aria-hidden="true">` +
 			`<g transform="translate(12 12)" fill="none" stroke="currentColor" stroke-width="1.7">` +
@@ -344,6 +348,9 @@ func renderPage(s *State, tok *TokenStats) string {
 
 	// 최상단 — 쓰는 에이전트의 마크를 크게 세우고 그 옆에 제목·갱신 시각.
 	brand := ""
+	if s.Antigravity.Available {
+		brand += agentIcon(markAntigravity, "xl")
+	}
 	if s.Claude.Available {
 		brand += agentIcon(markClaude, "xl")
 	}
@@ -360,6 +367,17 @@ func renderPage(s *State, tok *TokenStats) string {
 	}
 	b.WriteString(`</div>`)
 
+	for _, a := range []struct {
+		name  string
+		usage AgentUsage
+	}{{"Claude", s.Claude}, {"Codex", s.Codex}, {"Antigravity", s.Antigravity}} {
+		if a.usage.Available && a.usage.Error != "" {
+			fmt.Fprintf(&b, `<div class="panel" style="margin-bottom:14px"><strong>%s</strong> · %s</div>`, html.EscapeString(a.name), html.EscapeString(a.usage.Error))
+		}
+	}
+	if s.Antigravity.Available {
+		b.WriteString(`<p class="none">Antigravity는 모델별 잔여 한도와 리셋 시각을 표시합니다. 토큰 수와 과거 사용량은 제공되지 않습니다.</p>`)
+	}
 	if tok == nil {
 		b.WriteString(`<div class="panel none">토큰 집계가 아직 없다 — 첫 스캔이 끝나면 채워진다.</div></body></html>`)
 		return b.String()
@@ -451,6 +469,9 @@ func gaugeCards(s *State) []gaugeCard {
 		var src []chip
 		if s.Claude.Src != "" && s.Claude.Src != "api" {
 			src = []chip{{Text: s.Claude.Src}}
+			if s.Claude.AgeMin >= 0 {
+				src = append(src, chip{Text: fmtAge(s.Claude.AgeMin) + " 전"})
+			}
 		}
 		week := src
 		if s.Claude.Extra != "" {
@@ -479,6 +500,18 @@ func gaugeCards(s *State) []gaugeCard {
 		}
 		cards = append(cards, gaugeCard{"Codex · 주간", s.Codex.Week.Left, colCodex,
 			s.Codex.Week.ResetAt, chips, markCodex})
+	}
+	if s.Antigravity.Available {
+		chips := []chip{{Text: "로컬 앱"}}
+		if s.Antigravity.Src == "직전값" {
+			chips = append(chips, chip{Text: "직전값 " + fmtAge(s.Antigravity.AgeMin) + " 전"})
+		}
+		if len(s.Antigravity.Models) == 0 {
+			cards = append(cards, gaugeCard{"Antigravity", -1, colAntigravity, 0, chips, markAntigravity})
+		}
+		for _, m := range s.Antigravity.Models {
+			cards = append(cards, gaugeCard{"Antigravity · " + m.Label, m.Left, colAntigravity, m.ResetAt, chips, markAntigravity})
+		}
 	}
 	return cards
 }

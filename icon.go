@@ -20,9 +20,10 @@ import (
 )
 
 var (
-	colClaude = color.NRGBA{217, 119, 87, 255}
-	colCodex  = color.NRGBA{16, 163, 127, 255}
-	colDanger = color.NRGBA{239, 68, 68, 255}
+	colAntigravity = color.NRGBA{111, 145, 255, 255}
+	colClaude      = color.NRGBA{217, 119, 87, 255}
+	colCodex       = color.NRGBA{16, 163, 127, 255}
+	colDanger      = color.NRGBA{239, 68, 68, 255}
 )
 
 // size = 최종 픽셀 크기. ss = 슈퍼샘플 배수.
