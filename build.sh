@@ -28,8 +28,23 @@ fi
 
 # .app 번들 — 메뉴바 앱은 Dock 아이콘이 없어야 하므로 LSUIElement=true 를 넣는다.
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/usage-tray"
+
+# 앱 아이콘 — assets/icon.png(1024) 한 장에서 굽는다. sips·iconutil 은 맥 기본 도구다.
+# 메뉴바에 뜨는 그림이 아니라 Finder·로그인 항목·'정보 가져오기' 에 뜨는 번들 아이콘이다.
+if [ -f assets/icon.png ] && command -v iconutil >/dev/null 2>&1; then
+  ICONSET="$(mktemp -d)/AppIcon.iconset"
+  mkdir -p "$ICONSET"
+  for s in 16 32 128 256 512; do
+    sips -z $s $s assets/icon.png --out "$ICONSET/icon_${s}x${s}.png" >/dev/null
+    sips -z $((s * 2)) $((s * 2)) assets/icon.png --out "$ICONSET/icon_${s}x${s}@2x.png" >/dev/null
+  done
+  iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
+  rm -rf "$(dirname "$ICONSET")"
+else
+  echo "아이콘을 건너뛴다 (assets/icon.png 또는 iconutil 이 없다)"
+fi
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -42,6 +57,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
   <key>CFBundleShortVersionString</key><string>1.1.0</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleExecutable</key><string>usage-tray</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>LSUIElement</key><true/>
   <key>LSMinimumSystemVersion</key><string>11.0</string>
 </dict>

@@ -5,7 +5,7 @@ Claude Code · Codex · Antigravity 의 남은 사용량을 **작업표시줄(Wi
 - 링 길이가 남은 %, 20% 밑이면 빨강. 색이 어느 에이전트인지 알려 준다
 - **윈도우는 에이전트마다 링 하나**, **맥은 링 하나에 가장 급한 에이전트** ([왜 다른가](#아이콘-개수가-os-마다-다른-이유))
 - 마우스를 올리면 창별 남은량과 리셋 시각, 클릭하면 전부 합친 상세 화면(브라우저)
-- 남은량이 임계값을 넘으면 알림 한 번
+- 남은량이 임계값을 넘으면 알림 한 번, 창이 초기화돼 다시 쓸 수 있게 되면 또 한 번
 - **쓰는 에이전트만 나온다.** 하나도 없으면 실행되지 않는다
 
 바뀐 점과 연결 조건은 [UPGRADE.md](UPGRADE.md) 를 먼저 읽는다.
@@ -69,6 +69,14 @@ cd usage_tray
 powershell -ExecutionPolicy Bypass -File build.ps1 -Run
 ```
 
+앱 아이콘은 `rsrc_windows.syso` 로 exe 에 박혀 있다(리포에 들어 있어 그냥 빌드하면 된다).
+그림을 바꾸려면 `assets/icon.png` 를 갈아 끼우고 `assets/icon.ico` · `assets/favicon32.png`
+를 다시 만든 뒤 아래를 한 번 돌린다.
+
+```powershell
+go run github.com/akavel/rsrc@latest -ico assets\icon.ico -arch amd64 -o rsrc_windows.syso
+```
+
 ## 파일이 놓이는 곳
 
 `%LOCALAPPDATA%\usage-tray\` — 에이전트마다 갈라 띄우므로 `state-<agent>.json` ·
@@ -108,6 +116,9 @@ cd usage_tray
 ./build.sh          # dist/UsageTray.app (arm64 + amd64 유니버설)
 open dist/UsageTray.app
 ```
+
+`build.sh` 가 `assets/icon.png` 에서 `AppIcon.icns` 를 구워 번들에 넣는다(`sips` · `iconutil`
+둘 다 맥 기본 도구다). Finder·로그인 항목에 뜨는 그림이고, 메뉴바 링과는 무관하다.
 
 ## 파일이 놓이는 곳
 

@@ -455,8 +455,11 @@ func checkAlerts(s *State) {
 			changed = true
 			notify(t.label+" 한도 임박", fmt.Sprintf("%d%% 남음", v))
 		case fired && v >= t.rearm:
+			// 창이 초기화돼 다시 여유가 생긴 순간. 임박 알림을 띄웠던 창만 알린다 —
+			// 안 띄웠으면 사용자는 애초에 기다리고 있지 않았다.
 			s.Alerts[t.key] = false
 			changed = true
+			notify(t.label+" 초기화", fmt.Sprintf("%d%% 남았다 — 다시 쓸 수 있다", v))
 		}
 	}
 	if s.Codex.Available {
@@ -469,6 +472,7 @@ func checkAlerts(s *State) {
 		} else if lim == "" && fired {
 			s.Alerts["codexLimit"] = false
 			changed = true
+			notify("Codex 한도 해제", "다시 쓸 수 있다")
 		}
 	}
 	if changed {

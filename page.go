@@ -257,7 +257,8 @@ header{display:flex;align-items:center;flex-wrap:wrap;gap:6px 12px;margin-bottom
 h1{font-size:25px;letter-spacing:-.01em;margin:0}
 .brand{display:inline-flex;align-items:center;gap:8px;margin-right:2px}
 .meta{color:var(--dim);font-size:12px}
-.live{display:inline-block;width:6px;height:6px;border-radius:50%;background:#4ade80;margin-right:5px}
+/* 이름을 .live 로 두면 아래 .chip.live 가 이 규칙까지 물려받아 꼬리표가 6px 점으로 찌그러진다. */
+.dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:#4ade80;margin-right:5px}
 
 .row{display:grid;gap:14px;margin-bottom:14px}
 .row.cards{grid-template-columns:repeat(auto-fit,minmax(290px,1fr))}
@@ -344,6 +345,7 @@ func renderPage(s *State, tok *TokenStats) string {
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="dark">
 <meta http-equiv="refresh" content="30">
+<link rel="icon" href="data:image/png;base64,` + base64.StdEncoding.EncodeToString(faviconPNG) + `">
 <title>사용량</title><style>` + pageCSS + `</style></head><body>`)
 
 	// 최상단 — 쓰는 에이전트의 마크를 크게 세우고 그 옆에 제목·갱신 시각.
@@ -358,7 +360,7 @@ func renderPage(s *State, tok *TokenStats) string {
 		brand += agentIcon(markCodex, "xl")
 	}
 	fmt.Fprintf(&b, `<header><span class="brand">%s</span><h1>사용량</h1>`+
-		`<div class="meta"><span class="live"></span>%s 갱신 · 30초마다</div></header>`,
+		`<div class="meta"><span class="dot"></span>%s 갱신 · 30초마다</div></header>`,
 		brand, s.Updated.Local().Format("15:04:05"))
 
 	b.WriteString(`<div class="row cards">`)
