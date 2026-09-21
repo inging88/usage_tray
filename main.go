@@ -158,10 +158,17 @@ func main() {
 		return
 	}
 
-	// 둘 다 쓰는데 -only 가 없으면, 에이전트별로 자식을 하나씩 띄우고 이 프로세스는 빠진다.
-	// 아이콘이 둘로 갈라지는 지점이 여기다. 수집(refresh)보다 먼저 해야 부모가 상태 파일을
-	// 남기지 않는다 — 접미사 없는 state.json 은 한쪽만 쓰는 사람의 파일이다.
-	// Use one process and the original 47113 dashboard for all installed providers.
+	// 여럿을 쓰는데 -only 가 없으면, 에이전트별로 자식을 하나씩 띄우고 이 프로세스는 빠진다.
+	// 아이콘이 갈라지는 지점이 여기다. 맥은 이렇게 하면 메뉴바에 아무것도 안 뜨므로 한
+	// 프로세스로 간다 — splitPerAgent 주석에 이유가 있다.
+	// 수집(refresh)보다 먼저 해야 부모가 상태 파일을 남기지 않는다 — 접미사 없는 state.json
+	// 은 한쪽만 쓰는 사람의 파일이다.
+	if tag() == "" && !*once && splitPerAgent() {
+		if kids := activeAgents(); len(kids) > 1 {
+			spawnChildren(kids)
+			return
+		}
+	}
 
 	refresh()
 	if *once {
@@ -740,13 +747,28 @@ func tooltip(s *State) string {
 }
 
 // 자기 자신을 -only 로 두 번 띄운다. 부모는 바로 빠지므로 프로세스는 둘만 남는다.
-func spawnChildren() {
+// 지금 살아 있는 에이전트 이름. 자식을 띄울 때와 개수를 셀 때 쓴다.
+func activeAgents() []string {
+	var out []string
+	if agents.claude {
+		out = append(out, "claude")
+	}
+	if agents.codex {
+		out = append(out, "codex")
+	}
+	if agents.antigravity {
+		out = append(out, "antigravity")
+	}
+	return out
+}
+
+func spawnChildren(names []string) {
 	exe, err := os.Executable()
 	if err != nil {
 		logf("자기 경로를 못 찾는다: %v", err)
 		return
 	}
-	for _, a := range []string{"claude", "codex"} {
+	for _, a := range names {
 		cmd := exec.Command(exe, "-only", a)
 		hideWindow(cmd)
 		if err := cmd.Start(); err != nil {

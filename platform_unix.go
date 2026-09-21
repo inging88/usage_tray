@@ -59,6 +59,11 @@ func openPath(p string) {
 	_ = exec.Command(bin, p).Start()
 }
 
+// 맥은 프로세스를 갈라 띄우면 메뉴바에 아무것도 안 뜬다. .app 본체가 자식을 띄우고 빠지는
+// 순간 LaunchServices 가 앱을 끝난 것으로 보고, 번들 밖에서 도는 자식은 NSStatusItem 을 못
+// 얻기 때문이다. 그래서 한 프로세스가 링 하나를 띄우고 급한 쪽을 그린다.
+func splitPerAgent() bool { return false }
+
 // 작업표시줄 고정은 윈도우 개념이다. 맥 메뉴바 아이콘은 늘 보인다(자리가 모자라면 OS 가 줄인다).
 func promoteTrayIcons(restartExplorer bool) {
 	fmt.Println("-promote 는 윈도우 전용이다. 맥 메뉴바 아이콘은 따로 고정할 필요가 없다.")

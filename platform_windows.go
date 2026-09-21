@@ -62,6 +62,10 @@ func openURL(u string) { _ = runHidden("rundll32", "url.dll,FileProtocolHandler"
 
 func openPath(p string) { _ = exec.Command("explorer.exe", p).Start() }
 
+// 윈도우는 에이전트마다 프로세스를 하나씩 띄워 링을 따로 낸다. 트레이 API 가 프로세스당
+// 아이콘 1개만 주기 때문이고, 작업표시줄에는 아이콘 여러 개가 나란히 붙어도 문제가 없다.
+func splitPerAgent() bool { return true }
+
 // 트레이 아이콘을 오버플로(∧)에서 작업표시줄로 끌어올린다 — 설정의 '시스템 트레이 아이콘' 토글과 같다.
 //
 // Windows 11 은 아이콘별 표시 여부를 HKCU\Control Panel\NotifyIconSettings\<id>\IsPromoted 로

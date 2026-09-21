@@ -25,7 +25,9 @@
 
 화면 새로고침 30초, 내부 상태 확인 60초, Claude API 최소 3분, Codex·Antigravity 최소 2분, 토큰 기록 집계 5분입니다. Claude 429/503 오류는 최대 30분까지 재시도를 늦춥니다.
 
-기본 데이터: `~/Library/Application Support/usage-tray/`. 원본 앱의 기존 데이터 위치를 유지합니다. 기본 실행은 통합 `state.json`을 사용합니다. 고급 실행 옵션 `-only claude|codex|antigravity`도 지원합니다.
+기본 데이터: `~/Library/Application Support/usage-tray/`. 원본 앱의 기존 데이터 위치를 유지합니다. macOS 기본 실행은 통합 `state.json`을 사용합니다. 고급 실행 옵션 `-only claude|codex|antigravity`도 지원합니다.
+
+Windows는 예전처럼 에이전트마다 프로세스를 하나씩 띄워 트레이 아이콘을 따로 냅니다(`state-<agent>.json`). 링을 하나로 합치는 것은 macOS 전용 동작이며, 메뉴바에서는 프로세스를 가르면 아이콘이 아예 뜨지 않기 때문입니다.
 
 검증 시 `USAGE_TRAY_DATA_DIR`로 별도 데이터 폴더를 지정할 수 있습니다.
 
