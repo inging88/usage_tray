@@ -86,5 +86,6 @@ jobs:
           cache: true
       - name: 서식·정적 검사
         run: |
-          test -z "$(gofmt -l .)" || { echo '서식 불일치:'; gofmt -l .; exit 1; }
+          files="$(git ls-files '*.go' | grep -v '^vendor/')"
+          test -z "$(gofmt -l $files)" || { echo '서식 불일치:'; gofmt -l $files; exit 1; }
           go vet ./...
