@@ -552,6 +552,8 @@ func onReady() {
 				mu.Unlock()
 			case <-mDetail.ClickedCh:
 				openURL("http://" + listenAddr() + "/")
+			case <-systray.DClickedCh:
+				openURL("http://" + listenAddr() + "/")
 			case <-mRefresh.ClickedCh:
 				if tag() == "" {
 					agents.antigravity = agents.antigravity || detectAntigravity()
